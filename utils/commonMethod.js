@@ -80,3 +80,8 @@ export const uploadOnCloudinary = (fileBuffer, options = {}) => {
     stream.end(fileBuffer);
   });
 };
+
+export const deleteFromCloudinary = (publicId) => {
+  if (!publicId) return Promise.resolve();
+  return cloudinary.uploader.destroy(publicId, { invalidate: true });
+};

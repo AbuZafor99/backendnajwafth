@@ -6,6 +6,7 @@ import httpStatus from "http-status";
 import sendResponse from "../utils/sendResponse.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { User } from "./../model/user.model.js";
+import { getFirebaseAuth } from "../utils/firebaseAdmin.js";
 
 const buildAuthResponseData = (user, accessToken, refreshToken) => {
   const userObj = user.toObject();
@@ -145,6 +146,110 @@ export const login = catchAsync(async (req, res) => {
     statusCode: httpStatus.OK,
     success: true,
     message: "User Logged in successfully",
+    data: buildAuthResponseData(user, accessToken, refreshToken),
+  });
+});
+
+export const socialLogin = catchAsync(async (req, res) => {
+  const { idToken, provider, name } = req.body;
+  const supportedProviders = new Set(["google.com", "apple.com"]);
+
+  if (!idToken || !supportedProviders.has(provider)) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "A valid Google or Apple identity token is required",
+    );
+  }
+
+  const firebaseAuth = getFirebaseAuth();
+  if (!firebaseAuth) {
+    throw new AppError(
+      httpStatus.SERVICE_UNAVAILABLE,
+      "Social sign-in is temporarily unavailable",
+    );
+  }
+
+  let identity;
+  try {
+    identity = await firebaseAuth.verifyIdToken(idToken, true);
+  } catch {
+    throw new AppError(httpStatus.UNAUTHORIZED, "Invalid social sign-in token");
+  }
+
+  const tokenProvider = identity.firebase?.sign_in_provider;
+  if (tokenProvider !== provider || !identity.email || !identity.email_verified) {
+    throw new AppError(
+      httpStatus.UNAUTHORIZED,
+      "The social account email could not be verified",
+    );
+  }
+
+  const normalizedEmail = identity.email.trim().toLowerCase();
+  let user = await User.findOne({
+    $or: [
+      { firebaseUid: identity.uid },
+      { "socialIdentities.uid": identity.uid },
+      { email: normalizedEmail },
+    ],
+  });
+
+  if (user && user.role !== "buyer") {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "This account is not authorized for the buyer application",
+    );
+  }
+
+  if (!user) {
+    user = await User.create({
+      name: (name || identity.name || normalizedEmail.split("@")[0]).trim(),
+      email: normalizedEmail,
+      firebaseUid: identity.uid,
+      authProvider: provider,
+      socialIdentities: [{ uid: identity.uid, provider }],
+      role: "buyer",
+      verificationInfo: { token: "", verified: true },
+    });
+  } else {
+    user.firebaseUid = identity.uid;
+    user.authProvider = provider;
+    if (
+      !(user.socialIdentities || []).some(
+        (socialIdentity) => socialIdentity.uid === identity.uid,
+      )
+    ) {
+      user.socialIdentities ||= [];
+      user.socialIdentities.push({ uid: identity.uid, provider });
+    }
+    user.verificationInfo = { token: "", verified: true };
+    if (!user.name && (name || identity.name)) {
+      user.name = (name || identity.name).trim();
+    }
+  }
+
+  const jwtPayload = {
+    _id: user._id,
+    email: user.email,
+    role: user.role,
+  };
+  const accessToken = createToken(
+    jwtPayload,
+    process.env.JWT_ACCESS_SECRET,
+    process.env.JWT_ACCESS_EXPIRES_IN,
+  );
+  const refreshToken = createToken(
+    jwtPayload,
+    process.env.JWT_REFRESH_SECRET,
+    process.env.JWT_REFRESH_EXPIRES_IN,
+  );
+
+  user.refreshToken = refreshToken;
+  await user.save();
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "User logged in successfully",
     data: buildAuthResponseData(user, accessToken, refreshToken),
   });
 });
