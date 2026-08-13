@@ -247,7 +247,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"shopId\": \"{{shopId}}\",\n  \"title\": \"Atomic Habits\",\n  \"author\": \"James Clear\",\n  \"category\": \"{{categoryId}}\",\n  \"price\": 450,\n  \"description\": \"Self improvement book\",\n  \"coverImage\": \"https://example.com/cover.jpg\",\n  \"stock\": true\n}"
+              "raw": "{\n  \"shopId\": \"{{shopId}}\",\n  \"title\": \"Atomic Habits\",\n  \"author\": \"James Clear\",\n  \"category\": \"{{categoryId}}\",\n  \"price\": 450,\n  \"description\": \"Self improvement book\",\n  \"coverImage\": \"https://example.com/cover.jpg\",\n  \"stock\": 10,\n  \"is18Plus\": false\n}"
             },
             "url": "{{baseUrl}}/api/v1/books/add"
           },

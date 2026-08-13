@@ -40,7 +40,11 @@ const bookSchema = new mongoose.Schema(
       required: true,
       min: [0, "Stock quantity cannot be negative"],
       default: 0,
-    }
+    },
+    is18Plus: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true },
 );

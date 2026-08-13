@@ -39,8 +39,25 @@ function parseStockQuantity(value, { required = false } = {}) {
   return stock;
 }
 
+function parseBoolean(value, { required = false } = {}) {
+  if (value === undefined || value === null || value === "") {
+    if (required) {
+      throw new AppError(400, "A boolean value is required");
+    }
+    return undefined;
+  }
+
+  if (typeof value === "boolean") return value;
+
+  const normalized = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "oui"].includes(normalized)) return true;
+  if (["false", "0", "no", "non"].includes(normalized)) return false;
+
+  throw new AppError(400, "The 18+ value must be true or false");
+}
+
 export const createBook = catchAsync(async (req, res) => {
-  const { title, author, category, price, description, stock } = req.body;
+  const { title, author, category, price, description, stock, is18Plus } = req.body;
   const coverImage = await resolveCoverImage(req);
 
   const book = await Book.create({
@@ -52,6 +69,7 @@ export const createBook = catchAsync(async (req, res) => {
     description,
     coverImage,
     stock: parseStockQuantity(stock, { required: true }),
+    is18Plus: parseBoolean(is18Plus) ?? false,
   });
 
   return sendResponse(res, {
@@ -74,6 +92,7 @@ export const getAllBooks = catchAsync(async (req, res) => {
     sortBy = "createdAt",
     sortOrder = "desc",
     shopId,
+    is18Plus,
   } = req.query;
 
   const filter = {
@@ -99,6 +118,11 @@ export const getAllBooks = catchAsync(async (req, res) => {
 
   if (stock !== undefined) {
     filter.stock = stock === "true" ? { $gt: 0 } : { $lte: 0 };
+  }
+
+  if (is18Plus !== undefined) {
+    const adultOnly = parseBoolean(is18Plus, { required: true });
+    filter.is18Plus = adultOnly ? true : { $ne: true };
   }
 
   if (minPrice || maxPrice) {
@@ -216,6 +240,10 @@ export const updateBook = catchAsync(async (req, res, next) => {
 
   if (req.body.stock !== undefined) {
     updates.stock = parseStockQuantity(req.body.stock);
+  }
+
+  if (req.body.is18Plus !== undefined) {
+    updates.is18Plus = parseBoolean(req.body.is18Plus, { required: true });
   }
 
   const coverImage = await resolveCoverImage(req);

@@ -56,7 +56,7 @@ export const createPayment = async (req, res) => {
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(price * 100),
-      currency: "usd",
+      currency: "eur",
       automatic_payment_methods: { enabled: true },
       metadata: { userId, type, orderId },
     });
