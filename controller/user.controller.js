@@ -2,13 +2,20 @@ import httpStatus from "http-status";
 import { User } from "../model/user.model.js";
 import { Order } from "../model/order.model.js";
 import { DriverRequest } from "../model/driveReq.model.js";
-import { uploadOnCloudinary } from "../utils/commonMethod.js";
+import {
+  deleteFromCloudinary,
+  uploadOnCloudinary,
+} from "../utils/commonMethod.js";
 import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
 import { Book } from "../model/book.model.js";
 import { Review } from "../model/review.model.js";
 import { Notification } from "../model/notification.model.js";
+import { Cart } from "../model/cart.model.js";
+import { Wishlist } from "../model/wishlist.model.js";
+import { paymentInfo } from "../model/payment.model.js";
+import { getFirebaseAuth } from "../utils/firebaseAdmin.js";
 import {
   activeDriverRequestStatuses,
   getDriverAvailability,
@@ -325,6 +332,56 @@ export const getAdminDrivers = catchAsync(async (_req, res) => {
 
 export const deleteOwnAccount = catchAsync(async (req, res) => {
   const userId = req.user._id;
+  const role = req.user.role;
+
+  if (role !== "buyer" && role !== "driver") {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Account deletion is only available for buyer and driver accounts",
+    );
+  }
+
+  if (req.user.avatar?.public_id) {
+    try {
+      await deleteFromCloudinary(req.user.avatar.public_id);
+    } catch {
+      throw new AppError(
+        httpStatus.SERVICE_UNAVAILABLE,
+        "Could not delete the profile image",
+      );
+    }
+  }
+
+  const firebaseUids = new Set([
+    req.user.firebaseUid,
+    ...(req.user.socialIdentities || []).map((identity) => identity.uid),
+  ]);
+  firebaseUids.delete(undefined);
+  firebaseUids.delete(null);
+  firebaseUids.delete("");
+
+  if (firebaseUids.size > 0) {
+    const firebaseAuth = getFirebaseAuth();
+    if (!firebaseAuth) {
+      throw new AppError(
+        httpStatus.SERVICE_UNAVAILABLE,
+        "Account deletion is temporarily unavailable",
+      );
+    }
+
+    for (const firebaseUid of firebaseUids) {
+      try {
+        await firebaseAuth.deleteUser(firebaseUid);
+      } catch (error) {
+        if (error?.code !== "auth/user-not-found") {
+          throw new AppError(
+            httpStatus.SERVICE_UNAVAILABLE,
+            "Could not delete the linked social account",
+          );
+        }
+      }
+    }
+  }
 
   await Promise.all([
     DriverRequest.updateMany(
@@ -343,6 +400,22 @@ export const deleteOwnAccount = catchAsync(async (req, res) => {
     Notification.deleteMany({
       $or: [{ user: userId }, { actor: userId }],
     }),
+    Cart.deleteMany({ user: userId }),
+    Wishlist.deleteMany({ user: userId }),
+    Review.deleteMany({ user: userId }),
+    paymentInfo.updateMany({ userId }, { $unset: { userId: 1 } }),
+    Order.updateMany(
+      { customer: userId },
+      {
+        $unset: { customer: 1 },
+        $set: {
+          recipientName: "Deleted account",
+          phone: "",
+          address: "",
+          addressDetails: {},
+        },
+      },
+    ),
   ]);
 
   const user = await User.findByIdAndDelete(userId);

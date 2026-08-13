@@ -1,4 +1,5 @@
 import { cert, getApps, initializeApp } from "firebase-admin/app";
+import { getAuth as getFirebaseAuthForApp } from "firebase-admin/auth";
 import { getMessaging as getFirebaseMessaging } from "firebase-admin/messaging";
 import fs from "fs";
 import path from "path";
@@ -16,6 +17,7 @@ import path from "path";
  */
 
 let messaging = null;
+let firebaseAuth = null;
 
 const loadServiceAccount = () => {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -49,6 +51,7 @@ const init = () => {
   const existingApp = getApps()[0];
   if (existingApp) {
     messaging = getFirebaseMessaging(existingApp);
+    firebaseAuth = getFirebaseAuthForApp(existingApp);
     return;
   }
 
@@ -66,6 +69,7 @@ const init = () => {
       credential: cert(serviceAccount),
     });
     messaging = getFirebaseMessaging(app);
+    firebaseAuth = getFirebaseAuthForApp(app);
     console.log("[firebase] Admin initialised — push notifications enabled.");
   } catch (err) {
     console.error("[firebase] Failed to initialise Admin SDK:", err.message);
@@ -76,3 +80,4 @@ init();
 
 export const isPushEnabled = () => messaging !== null;
 export const getMessaging = () => messaging;
+export const getFirebaseAuth = () => firebaseAuth;

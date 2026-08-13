@@ -5,6 +5,26 @@ const userSchema = new mongoose.Schema(
   {
     name: { type: String },
     email: { type: String },
+    firebaseUid: { type: String, unique: true, sparse: true, trim: true },
+    authProvider: {
+      type: String,
+      enum: ["password", "google.com", "apple.com"],
+      default: "password",
+    },
+    socialIdentities: {
+      type: [
+        {
+          _id: false,
+          uid: { type: String, required: true, trim: true },
+          provider: {
+            type: String,
+            required: true,
+            enum: ["google.com", "apple.com"],
+          },
+        },
+      ],
+      default: [],
+    },
     userId: { type: String, unique: true, sparse: true, trim: true },
     password: { type: String, select: 0 },
     username: { type: String },
@@ -92,5 +112,7 @@ userSchema.statics.isPasswordMatched = async function (
 ) {
   return await bcrypt.compare(plainTextPassword, hashPassword);
 };
+
+userSchema.index({ "socialIdentities.uid": 1 }, { unique: true, sparse: true });
 
 export const User = mongoose.model("User", userSchema);

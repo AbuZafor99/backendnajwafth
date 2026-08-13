@@ -8,6 +8,7 @@ import {
   refreshToken,
   logout,
   verifyOTPForReset,
+  socialLogin,
 } from "../controller/auth.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 
@@ -18,6 +19,9 @@ router.post("/register", register);
 
 // Sign in
 router.post("/login", login);
+
+// Sign in with a Firebase-verified Google or Apple identity.
+router.post("/social-login", socialLogin);
 
 // Forgot password -> send OTP
 router.post("/forgot-password", forgetPassword);
