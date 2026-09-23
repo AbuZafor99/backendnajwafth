@@ -359,7 +359,7 @@ export const deleteOwnAccount = catchAsync(async (req, res) => {
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "Account deactivated successfully",
+    message: "Account deleted successfully",
     data: null,
   });
 });
