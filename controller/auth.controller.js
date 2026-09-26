@@ -33,8 +33,20 @@ const buildAuthResponseData = (user, accessToken, refreshToken) => {
   };
 };
 
+export const resolvePublicRegistrationRole = (role) => {
+  const registrationRole = role || "buyer";
+  if (!["buyer", "seller"].includes(registrationRole)) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Public registration is only available for buyer or seller accounts",
+    );
+  }
+  return registrationRole;
+};
+
 export const register = catchAsync(async (req, res) => {
   const { name, email, phone, password, confirmPassword, role } = req.body;
+  const registrationRole = resolvePublicRegistrationRole(role);
 
   if (!name || !email || !password) {
     throw new AppError(httpStatus.FORBIDDEN, "Please fill in all fields");
@@ -59,7 +71,7 @@ export const register = catchAsync(async (req, res) => {
     email,
     phone,
     password,
-    role,
+    role: registrationRole,
     verificationInfo: { token: "", verified: true },
   });
 

@@ -2,14 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { getPublicShops } from "../controller/publicShop.controller.js";
 import { getAllBooks } from "../controller/book.controller.js";
-import { User } from "../model/user.model.js";
 import { Shop } from "../model/shop.model.js";
 import { Book } from "../model/book.model.js";
 import shopRouter from "../route/shop.route.js";
 import { protect } from "../middleware/auth.middleware.js";
 
 const ownerId = "111111111111111111111111";
-const shopId = "222222222222222222222222";
 function invoke(handler, query = {}) {
   return new Promise((resolve, reject) => handler({ query }, {
     status() { return this; }, json: resolve,
@@ -23,53 +21,57 @@ test("public route precedes authentication; admin routes remain protected", () =
   assert.ok(publicIndex >= 0 && publicIndex < authIndex && authIndex < adminIndex);
 });
 
-test("guest directory paginates active sellers and returns only public fields", async (t) => {
-  const calls = {};
-  t.mock.method(User, "find", (filter) => {
-    calls.filter = filter;
-    const chain = {
-      select(value) { calls.select = value; return this; },
-      sort(value) { calls.sort = value; return this; },
-      skip(value) { calls.skip = value; return this; },
-      limit(value) { calls.limit = value; return this; },
-      async lean() { return [{ _id: ownerId, name: "Seller", email: "private@example.com", address: "Private home" }]; },
-    };
-    return chain;
-  });
-  t.mock.method(User, "countDocuments", async (filter) => {
-    assert.deepEqual(filter, { role: "seller", deletedAt: null });
-    return 5;
-  });
-  t.mock.method(Shop, "find", (filter) => {
-    assert.deepEqual(filter, { owner: { $in: [ownerId] } });
-    return { select() { return this; }, async lean() { return [{
-      _id: shopId, owner: ownerId, name: "Real bookstore", address: "Public storefront",
-      certificate: { url: "private-document" },
-      banner: [{ url: "https://example.com/banner.jpg", public_id: "internal" }],
-    }]; } };
+test("guest directory paginates seller shops regardless of approval status", async (t) => {
+  let pipeline;
+  t.mock.method(Shop, "aggregate", async (value) => {
+    pipeline = value;
+    return [{
+      metadata: [{ total: 5 }],
+      data: [{
+        id: ownerId,
+        name: "Real bookstore",
+        logo: null,
+        banner: ["https://example.com/banner.jpg"],
+        description: "",
+        address: "Public storefront",
+        bookCount: 12,
+      }],
+    }];
   });
   const result = await invoke(getPublicShops, { page: "2", limit: "2" });
   assert.equal(result.success, true);
-  assert.deepEqual(calls.filter, { role: "seller", deletedAt: null });
-  assert.equal(calls.select, "_id name username");
-  assert.deepEqual(calls.sort, { createdAt: -1, _id: -1 });
-  assert.equal(calls.skip, 2);
-  assert.equal(calls.limit, 2);
-  assert.deepEqual(result.data.pagination, { page: 2, limit: 2, total: 5, totalPages: 3 });
-  assert.deepEqual(result.data.shops, [{ ownerId, shopId, name: "Real bookstore",
-    description: "", address: "Public storefront", banner: [{ url: "https://example.com/banner.jpg" }] }]);
+  assert.equal(pipeline[0].$lookup.from, "users");
+  assert.deepEqual(pipeline[2], { $match: {
+    "owner.role": "seller", "owner.deletedAt": null,
+    "owner.verificationInfo.verified": true,
+  } });
+  assert.equal(
+    pipeline.some((stage) => stage.$match?.shopStatus !== undefined),
+    false,
+  );
+  const facet = pipeline.find((stage) => stage.$facet).$facet;
+  assert.deepEqual(facet.data.slice(0, 2), [{ $skip: 2 }, { $limit: 2 }]);
+  assert.equal(facet.data[2].$lookup.from, Book.collection.name);
+  const publicFields = facet.data[3].$project;
+  assert.deepEqual(publicFields.logo, { $literal: null });
+  assert.deepEqual(Object.keys(publicFields).sort(), [
+    "_id", "address", "banner", "bookCount", "description", "id", "logo", "name",
+  ]);
+  assert.deepEqual(result.pagination, {
+    page: 2, limit: 2, total: 5, totalPages: 3, hasNextPage: true,
+  });
+  assert.deepEqual(result.data, [{ id: ownerId, name: "Real bookstore",
+    logo: null, banner: ["https://example.com/banner.jpg"], description: "",
+    address: "Public storefront", bookCount: 12 }]);
 });
 
-test("seller without shop uses name fallback without exposing personal address", async (t) => {
-  t.mock.method(User, "find", () => ({
-    select() { return this; }, sort() { return this; }, skip() { return this; },
-    limit() { return this; }, async lean() { return [{ _id: ownerId, name: "Seller", address: "Private" }]; },
-  }));
-  t.mock.method(User, "countDocuments", async () => 1);
-  t.mock.method(Shop, "find", () => ({ select() { return this; }, async lean() { return []; } }));
+test("directory returns a consistent empty response", async (t) => {
+  t.mock.method(Shop, "aggregate", async () => [{ metadata: [], data: [] }]);
   const result = await invoke(getPublicShops);
-  assert.deepEqual(result.data.shops[0], { ownerId, shopId: null, name: "Seller",
-    description: "", address: "", banner: [] });
+  assert.deepEqual(result.data, []);
+  assert.deepEqual(result.pagination, {
+    page: 1, limit: 12, total: 0, totalPages: 0, hasNextPage: false,
+  });
 });
 
 test("invalid public pagination returns 400", async () => {
@@ -91,4 +93,11 @@ test("existing public book catalog filters both query and count by seller ID", a
   assert.equal(result.success, true);
   assert.deepEqual(result.data.books, []);
   assert.deepEqual(filters, [{ shopId: ownerId }, { shopId: ownerId }]);
+});
+
+test("public book catalog rejects an invalid seller ID", async () => {
+  await assert.rejects(
+    invoke(getAllBooks, { shopId: "not-an-object-id" }),
+    (error) => error.statusCode === 400 && error.message === "Invalid bookstore ID",
+  );
 });
